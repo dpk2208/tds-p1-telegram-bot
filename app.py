@@ -8,10 +8,10 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 GIST_ID = os.environ.get("GIST_ID", "")  # leave blank on first deploy; we create one automatically
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
@@ -23,20 +23,20 @@ def send_telegram_message(chat_id, text):
     requests.post(f"{TELEGRAM_API}/sendMessage", json={"chat_id": chat_id, "text": text}, timeout=30)
 
 
-def call_gemini(prompt):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+def call_llm(prompt):
+    url = "https://api.openai.com/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY,
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
     }
     body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "tools": [{"google_search": {}}],
+        "model": OPENAI_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
     }
     r = requests.post(url, headers=headers, json=body, timeout=60)
     r.raise_for_status()
     data = r.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    return data["choices"][0]["message"]["content"].strip()
 
 
 def ensure_gist():
@@ -107,7 +107,7 @@ def webhook():
     run_id = str(uuid.uuid4())
 
     try:
-        answer_text = call_gemini(prompt)
+        answer_text = call_llm(prompt)
         error = None
     except Exception as e:
         answer_text = ""
