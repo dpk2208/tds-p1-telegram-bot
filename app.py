@@ -11,7 +11,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 GIST_ID = os.environ.get("GIST_ID", "")  # leave blank on first deploy; we create one automatically
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
@@ -24,19 +24,33 @@ def send_telegram_message(chat_id, text):
 
 
 def call_llm(prompt):
-    url = "https://api.openai.com/v1/chat/completions"
+    url = "https://api.openai.com/v1/responses"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {OPENAI_API_KEY}",
     }
     body = {
         "model": OPENAI_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
+        "input": prompt,
+        "tools": [{"type": "web_search"}],
     }
-    r = requests.post(url, headers=headers, json=body, timeout=60)
+    r = requests.post(url, headers=headers, json=body, timeout=90)
     r.raise_for_status()
     data = r.json()
-    return data["choices"][0]["message"]["content"].strip()
+
+    # Responses API: find the assistant's message output and extract its text
+    for item in data.get("output", []):
+        if item.get("type") == "message":
+            parts = item.get("content", [])
+            texts = [p.get("text", "") for p in parts if p.get("type") == "output_text"]
+            if texts:
+                return "".join(texts).strip()
+
+    # fallback: some SDKs expose a flattened "output_text" field
+    if "output_text" in data:
+        return str(data["output_text"]).strip()
+
+    raise ValueError(f"Could not find text output in response: {json.dumps(data)[:500]}")
 
 
 def ensure_gist():
