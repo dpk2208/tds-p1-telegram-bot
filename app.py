@@ -108,3 +108,50 @@ def webhook():
 
     try:
         answer_text = call_llm(prompt)
+        error = None
+    except Exception as e:
+        answer_text = ""
+        error = str(e)
+
+    log_url = append_log(
+        {
+            "run_id": run_id,
+            "ts": time.time(),
+            "chat_id": chat_id,
+            "input": text,
+            "history": history[:],
+            "model_output": answer_text,
+            "error": error,
+        }
+    )
+
+    # try to parse model output as JSON and inject the correct log_url
+    final_text = None
+    try:
+        cleaned = answer_text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`")
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:]
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            parsed["log_url"] = log_url
+            final_text = json.dumps(parsed)
+    except Exception:
+        pass
+
+    if final_text is None:
+        # fallback: wrap whatever we got so the reply is still valid JSON
+        final_text = json.dumps({"answer": answer_text or None, "log_url": log_url})
+
+    send_telegram_message(chat_id, final_text)
+    return jsonify(ok=True)
+
+
+@app.route("/", methods=["GET"])
+def health():
+    return "OK - bot is running"
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
