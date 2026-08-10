@@ -104,22 +104,28 @@ def process_message(chat_id, text):
     if len(history) > 10:
         history.pop(0)
 
-    convo = "\n".join(f"Message {i + 1}: {t}" for i, t in enumerate(history))
     today_str = time.strftime("%Y-%m-%d (%A)", time.gmtime())
+    earlier = history[:-1]
+    current_question = history[-1]
+
+    context_block = ""
+    if earlier:
+        context_lines = "\n".join(f"- {t}" for t in earlier)
+        context_block = f"Earlier messages in this conversation (context only, do not answer these):\n{context_lines}\n\n"
+
     prompt = (
-        f"The current real-world date is {today_str} (UTC). Treat this as ground truth — "
-        "never guess or hallucinate a different date.\n\n"
-        "You are a data analyst with live web search access. You MUST use web search to "
-        "verify any fact, statistic, ranking, or figure before answering — never rely on "
-        "your training data alone, since it may be outdated. After searching, base your "
-        "answer strictly on what the search results actually say; do not override retrieved "
-        "facts with your own prior assumptions. This is especially important for questions "
-        "about current records, current rankings, or recent statistics. "
-        "Below is a conversation of messages sent to you in order. Answer only the LAST "
-        "message, using earlier messages as context if relevant. If the last message specifies "
-        "an exact JSON output format, respond with ONLY that exact JSON object and nothing "
-        "else — no markdown formatting, no code fences, no explanation before or after it.\n\n"
-        f"{convo}"
+        "You are a data analyst with live web search access.\n\n"
+        f"{context_block}"
+        "Answer ONLY the following question. Use the earlier messages above only as "
+        "context if relevant to interpreting this question:\n"
+        f"\"{current_question}\"\n\n"
+        "Rules:\n"
+        "- Use web search to verify any fact, statistic, ranking, or figure. Do not rely on "
+        "memorized training data for anything that could have changed.\n"
+        f"- If asked about the current date or 'today', the real date is {today_str} (UTC) — "
+        "use this directly, do not search for it.\n"
+        "- If the question specifies an exact JSON output format, respond with ONLY that exact "
+        "JSON object and nothing else — no markdown, no code fences, no explanation."
     )
 
     run_id = str(uuid.uuid4())
