@@ -11,7 +11,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 GIST_ID = os.environ.get("GIST_ID", "")  # leave blank on first deploy; we create one automatically
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
@@ -40,6 +40,7 @@ def call_llm(prompt):
     r.raise_for_status()
     data = r.json()
 
+    # Responses API: find the assistant's message output and extract its text
     for item in data.get("output", []):
         if item.get("type") == "message":
             parts = item.get("content", [])
@@ -47,6 +48,7 @@ def call_llm(prompt):
             if texts:
                 return "".join(texts).strip()
 
+    # fallback: some SDKs expose a flattened "output_text" field
     if "output_text" in data:
         return str(data["output_text"]).strip()
 
@@ -93,27 +95,26 @@ def append_log(entry):
     return f"https://gist.githubusercontent.com/{user}/{gist_id}/raw/run.jsonl"
 
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    update = request.get_json(force=True)
-    message = update.get("message") or update.get("edited_message")
-    if not message or "text" not in message:
-        return jsonify(ok=True)
+import threading
 
-    chat_id = message["chat"]["id"]
-    text = message["text"]
 
+def process_message(chat_id, text):
     history = chat_history.setdefault(chat_id, [])
     history.append(text)
     if len(history) > 10:
         history.pop(0)
 
     convo = "\n".join(f"Message {i + 1}: {t}" for i, t in enumerate(history))
+    today_str = time.strftime("%Y-%m-%d (%A)", time.gmtime())
     prompt = (
+        f"The current real-world date is {today_str} (UTC). Treat this as ground truth — "
+        "never guess or hallucinate a different date.\n\n"
         "You are a data analyst with live web search access. You MUST use web search to "
-        "verify any fact, statistic, date, ranking, or figure before answering — never rely "
-        "on your training data alone, since it may be outdated. This is especially important "
-        "for questions about 'today', current records, current rankings, or recent statistics. "
+        "verify any fact, statistic, ranking, or figure before answering — never rely on "
+        "your training data alone, since it may be outdated. After searching, base your "
+        "answer strictly on what the search results actually say; do not override retrieved "
+        "facts with your own prior assumptions. This is especially important for questions "
+        "about current records, current rankings, or recent statistics. "
         "Below is a conversation of messages sent to you in order. Answer only the LAST "
         "message, using earlier messages as context if relevant. If the last message specifies "
         "an exact JSON output format, respond with ONLY that exact JSON object and nothing "
@@ -160,6 +161,21 @@ def webhook():
         final_text = json.dumps({"answer": answer_text or None, "log_url": log_url})
 
     send_telegram_message(chat_id, final_text)
+
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    update = request.get_json(force=True)
+    message = update.get("message") or update.get("edited_message")
+    if not message or "text" not in message:
+        return jsonify(ok=True)
+
+    chat_id = message["chat"]["id"]
+    text = message["text"]
+
+    # ack Telegram immediately so it never times out and retries this update;
+    # do the slow LLM/search/logging work in the background instead
+    threading.Thread(target=process_message, args=(chat_id, text), daemon=True).start()
     return jsonify(ok=True)
 
 
