@@ -33,12 +33,13 @@ def call_llm(prompt):
         "model": OPENAI_MODEL,
         "input": prompt,
         "tools": [{"type": "web_search"}],
+        "tool_choice": "required",
+        "max_output_tokens": 4000,
     }
     r = requests.post(url, headers=headers, json=body, timeout=90)
     r.raise_for_status()
     data = r.json()
 
-    # Responses API: find the assistant's message output and extract its text
     for item in data.get("output", []):
         if item.get("type") == "message":
             parts = item.get("content", [])
@@ -46,7 +47,6 @@ def call_llm(prompt):
             if texts:
                 return "".join(texts).strip()
 
-    # fallback: some SDKs expose a flattened "output_text" field
     if "output_text" in data:
         return str(data["output_text"]).strip()
 
@@ -110,11 +110,14 @@ def webhook():
 
     convo = "\n".join(f"Message {i + 1}: {t}" for i, t in enumerate(history))
     prompt = (
-        "You are a data analyst. Below is a conversation of messages sent to you in order. "
-        "Answer only the LAST message, using earlier messages as context if relevant. "
-        "If the last message specifies an exact JSON output format, respond with ONLY that "
-        "exact JSON object and nothing else — no markdown formatting, no code fences, no "
-        "explanation before or after it.\n\n"
+        "You are a data analyst with live web search access. You MUST use web search to "
+        "verify any fact, statistic, date, ranking, or figure before answering — never rely "
+        "on your training data alone, since it may be outdated. This is especially important "
+        "for questions about 'today', current records, current rankings, or recent statistics. "
+        "Below is a conversation of messages sent to you in order. Answer only the LAST "
+        "message, using earlier messages as context if relevant. If the last message specifies "
+        "an exact JSON output format, respond with ONLY that exact JSON object and nothing "
+        "else — no markdown formatting, no code fences, no explanation before or after it.\n\n"
         f"{convo}"
     )
 
@@ -139,7 +142,6 @@ def webhook():
         }
     )
 
-    # try to parse model output as JSON and inject the correct log_url
     final_text = None
     try:
         cleaned = answer_text.strip()
@@ -155,7 +157,6 @@ def webhook():
         pass
 
     if final_text is None:
-        # fallback: wrap whatever we got so the reply is still valid JSON
         final_text = json.dumps({"answer": answer_text or None, "log_url": log_url})
 
     send_telegram_message(chat_id, final_text)
